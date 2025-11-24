@@ -26,7 +26,6 @@ jobs:
             -DLLAMA_NATIVE=OFF \
             -DGGML_BLAS=ON \
             -DGGML_BLAS_VENDOR=OpenBLAS \
-            -DGGML_LTO=ON \
             -DLLAMA_AVX=OFF \
             -DLLAMA_AVX2=OFF \
             -DLLAMA_AVX512=OFF \
