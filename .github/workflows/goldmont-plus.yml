@@ -31,6 +31,7 @@ jobs:
             -DGGML_F16C=OFF \
             -DGGML_AVX=OFF \
             -DGGML_AVX2=OFF \
+            -DGGML_BMI2=OFF \
             -DGGML_AVX512=OFF \
             -DCMAKE_CXX_FLAGS="-march=goldmont-plus -mtune=goldmont-plus -O3" \
             -DCMAKE_C_FLAGS="-march=goldmont-plus -mtune=goldmont-plus -O3"
