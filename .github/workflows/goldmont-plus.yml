@@ -27,11 +27,8 @@ jobs:
             -DGGML_LTO=ON \
             -DGGML_BLAS=ON \
             -DGGML_BLAS_VENDOR=OpenBLAS \
-            -DLLAMA_AVX=OFF \
-            -DLLAMA_AVX2=OFF \
-            -DLLAMA_AVX512=OFF \
-            -DLLAMA_FMA=OFF \
-            -DLLAMA_F16C=OFF \
+            -DGGML_FMA=OFF \
+            -DGGML_F16C=OFF \
             -DGGML_AVX=OFF \
             -DGGML_AVX2=OFF \
             -DGGML_AVX512=OFF \
