@@ -12,7 +12,7 @@ jobs:
           submodules: recursive
 
       - name: Install Dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libopenblas-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libopenblas-dev curl
 
       - name: Compile with Max Optimizations
         run: |
