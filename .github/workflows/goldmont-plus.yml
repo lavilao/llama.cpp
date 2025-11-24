@@ -1,4 +1,4 @@
-name: Max Speed Goldmont Plus (LTO + OpenBLAS)
+name: Fixed Goldmont Plus Build
 
 on: workflow_dispatch
 
@@ -12,15 +12,17 @@ jobs:
           submodules: recursive
 
       - name: Install Dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libopenblas-dev curl
+        # Added libcurl4-openssl-dev to fix the Curl error
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libopenblas-dev libcurl4-openssl-dev
 
-      - name: Compile with Max Optimizations
+      - name: Compile
         run: |
           mkdir build
           cd build
           
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_NATIVE=OFF \
             -DLLAMA_NATIVE=OFF \
             -DGGML_BLAS=ON \
             -DGGML_BLAS_VENDOR=OpenBLAS \
@@ -33,10 +35,11 @@ jobs:
             -DCMAKE_CXX_FLAGS="-march=goldmont-plus -mtune=goldmont-plus -O3" \
             -DCMAKE_C_FLAGS="-march=goldmont-plus -mtune=goldmont-plus -O3"
           
-          cmake --build . --config Release -j $(nproc)
+          # We use VERBOSE=1 to verify that -march=native is gone from the final command
+          VERBOSE=1 cmake --build . --config Release -j $(nproc)
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: llama-goldmont-plus-max-speed
+          name: llama-goldmont-plus-fixed
           path: build/bin/*
