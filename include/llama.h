@@ -309,6 +309,7 @@ extern "C" {
         // Keep the booleans together to avoid misalignment during copy-by-value.
         bool vocab_only;      // only load the vocabulary, no weights
         bool use_mmap;        // use mmap if possible
+        bool use_direct_io;   // use direct io, takes precedence over use_mmap
         bool use_mlock;       // force system to keep model in RAM
         bool check_tensors;   // validate model tensor data
         bool use_extra_bufts; // use extra buffer types (used for weight repacking)
@@ -494,7 +495,7 @@ extern "C" {
                     struct llama_context_params * cparams,
                                           float * tensor_split,          // writable buffer for tensor split, needs at least llama_max_devices elements
         struct llama_model_tensor_buft_override * tensor_buft_overrides, // writable buffer for overrides, needs at least llama_max_tensor_buft_overrides elements
-                                         size_t   margin,                // margin of memory to leave per device in bytes
+                                         size_t * margins,               // margins of memory to leave per device in bytes
                                        uint32_t   n_ctx_min,             // minimum context size to set when trying to reduce memory use
                             enum ggml_log_level   log_level);            // minimum log level to print during fitting, lower levels go to debug log
 
@@ -535,6 +536,7 @@ extern "C" {
     LLAMA_API int32_t llama_model_n_ctx_train(const struct llama_model * model);
     LLAMA_API int32_t llama_model_n_embd     (const struct llama_model * model);
     LLAMA_API int32_t llama_model_n_embd_inp (const struct llama_model * model);
+    LLAMA_API int32_t llama_model_n_embd_out (const struct llama_model * model);
     LLAMA_API int32_t llama_model_n_layer    (const struct llama_model * model);
     LLAMA_API int32_t llama_model_n_head     (const struct llama_model * model);
     LLAMA_API int32_t llama_model_n_head_kv  (const struct llama_model * model);
@@ -644,7 +646,8 @@ extern "C" {
 
     // Manually free a LoRA adapter
     // NOTE: loaded adapters will be free when the associated model is deleted
-    LLAMA_API void llama_adapter_lora_free(struct llama_adapter_lora * adapter);
+    LLAMA_API DEPRECATED(void llama_adapter_lora_free(struct llama_adapter_lora * adapter),
+            "adapters are now freed together with the associated model");
 
     // Get the invocation tokens if the current lora is an alora
     LLAMA_API uint64_t            llama_adapter_get_alora_n_invocation_tokens(const struct llama_adapter_lora * adapter);
@@ -1253,7 +1256,6 @@ extern "C" {
     // [EXPERIMENTAL]
     // attach a sampler to the context
     // note: prefer initializing the context with llama_context_params.samplers when possible
-    // note: changing the samplers of a context can cause graph reallocations and degraded performance
     LLAMA_API bool llama_set_sampler(struct llama_context * ctx, llama_seq_id seq_id, struct llama_sampler * smpl);
 
     // mirror of llama_sampler_i:
@@ -1290,7 +1292,9 @@ extern "C" {
     // available samplers:
 
     LLAMA_API struct llama_sampler * llama_sampler_init_greedy(void);
-    LLAMA_API struct llama_sampler * llama_sampler_init_dist  (uint32_t seed);
+
+    /// seed == LLAMA_DEFAULT_SEED to use a random seed.
+    LLAMA_API struct llama_sampler * llama_sampler_init_dist(uint32_t seed);
 
     /// @details Top-K sampling described in academic paper "The Curious Case of Neural Text Degeneration" https://arxiv.org/abs/1904.09751
     /// Setting k <= 0 makes this a noop
