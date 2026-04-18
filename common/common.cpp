@@ -1,6 +1,7 @@
 #include "ggml.h"
 #include "gguf.h"
 
+#include "build-info.h"
 #include "common.h"
 #include "log.h"
 #include "llama.h"
@@ -372,7 +373,7 @@ void common_init() {
     const char * build_type = " (debug)";
 #endif
 
-    LOG_DBG("build: %d (%s) with %s for %s%s\n", LLAMA_BUILD_NUMBER, LLAMA_COMMIT, LLAMA_COMPILER, LLAMA_BUILD_TARGET, build_type);
+    LOG_DBG("build: %d (%s) with %s for %s%s\n", llama_build_number(), llama_commit(), llama_compiler(), llama_build_target(), build_type);
 }
 
 std::string common_params_get_system_info(const common_params & params) {
@@ -1442,6 +1443,7 @@ struct llama_model_params common_model_params_to_llama(common_params & params) {
 
     mparams.progress_callback           = params.load_progress_callback;
     mparams.progress_callback_user_data = params.load_progress_callback_user_data;
+    mparams.no_alloc                    = params.no_alloc;
 
     return mparams;
 }
