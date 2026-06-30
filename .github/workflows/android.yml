@@ -1,0 +1,75 @@
+name: Build llama.cpp for Android ARMv7 with Vulkan
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build llama.cpp Android ARMv7 + Vulkan (API 24)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout llama.cpp repository
+        uses: actions/checkout@v4
+        with:
+          repository: ggerganov/llama.cpp
+          submodules: recursive
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+          add-to-path: true
+
+      - name: Install Vulkan dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev glslang-tools glslang-dev
+
+      - name: Create build directory
+        run: mkdir -p build-android
+
+      - name: Configure CMake for Android with Vulkan
+        working-directory: build-android
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cmake .. \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=armeabi-v7a \
+            -DANDROID_PLATFORM=android-24 \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF \
+            -DGGML_VULKAN=ON \
+            -DCMAKE_C_FLAGS="-march=armv7-a -mfpu=neon -mfloat-abi=softfp" \
+            -DCMAKE_CXX_FLAGS="-march=armv7-a -mfpu=neon -mfloat-abi=softfp"
+
+      - name: Build llama.cpp
+        working-directory: build-android
+        run: |
+          cmake --build . --config Release -j$(nproc)
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llamacpp-android-armv7-vulkan-api24
+          path: |
+            build-android/bin/
+            build-android/lib/
+          retention-days: 7
+          if-no-files-found: warn
