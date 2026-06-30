@@ -1,0 +1,110 @@
+name: Build llama.cpp Android ARMv7 (Redmi 9A Optimized)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    env:
+      BUILD_DIR: build-android
+      ABI: armeabi-v7a
+      API_LEVEL: 24
+
+    steps:
+      - name: Checkout llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggerganov/llama.cpp
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            ccache
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
+
+      - name: Setup Android NDK r26b
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+          add-to-path: true
+
+      - name: Configure
+        env:
+          NDK: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          cmake -S . -B $BUILD_DIR \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=$ABI \
+            -DANDROID_PLATFORM=android-$API_LEVEL \
+            -DANDROID_STL=c++_shared \
+            -DANDROID_ARM_NEON=ON \
+            \
+            -DBUILD_SHARED_LIBS=ON \
+            \
+            -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF \
+            -DGGML_CCACHE=ON \
+            -DGGML_LTO=ON \
+            \
+            -DGGML_VULKAN=OFF \
+            -DGGML_OPENCL=OFF \
+            -DGGML_CUDA=OFF \
+            -DGGML_HIP=OFF \
+            -DGGML_METAL=OFF \
+            -DGGML_SYCL=OFF \
+            -DGGML_RPC=OFF \
+            \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=ON \
+            -DLLAMA_BUILD_SERVER=ON \
+            -DLLAMA_BUILD_COMMON=ON
+
+      - name: Build
+        run: |
+          cmake --build $BUILD_DIR --parallel $(nproc)
+
+      - name: Strip binaries
+        env:
+          NDK: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+
+          find $BUILD_DIR -type f \( -name "llama-*" -o -name "*.so" \) | while read f; do
+            $STRIP "$f" || true
+          done
+
+      - name: List generated files
+        run: |
+          find $BUILD_DIR -type f
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama.cpp-android-armv7-redmi9a
+          path: |
+            build-android/bin/**
+            build-android/lib/**
+            build-android/**/*.so
+          retention-days: 7
