@@ -33,10 +33,12 @@ jobs:
           ndk-version: r26b
           add-to-path: true
 
-      - name: Install Vulkan dependencies
+      - name: Install Vulkan SDK
         run: |
+          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
           sudo apt-get update
-          sudo apt-get install -y libvulkan-dev glslang-tools glslang-dev
+          sudo apt-get install -y vulkan-sdk
 
       - name: Create build directory
         run: mkdir -p build-android
@@ -56,6 +58,7 @@ jobs:
             -DGGML_NATIVE=OFF \
             -DGGML_OPENMP=OFF \
             -DGGML_VULKAN=ON \
+            -DVULKAN_SDK=/usr \
             -DCMAKE_C_FLAGS="-march=armv7-a -mfpu=neon -mfloat-abi=softfp" \
             -DCMAKE_CXX_FLAGS="-march=armv7-a -mfpu=neon -mfloat-abi=softfp"
 
