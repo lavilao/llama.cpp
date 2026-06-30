@@ -1,4 +1,4 @@
-name: Build llama.cpp Android ARMv7 (Stable Redmi 9A)
+name: llama.cpp Android ARMv7 (FIXED Redmi 9A)
 
 on:
   workflow_dispatch:
@@ -10,14 +10,13 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout llama.cpp
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           repository: ggerganov/llama.cpp
           submodules: recursive
-          fetch-depth: 1
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build ccache
@@ -25,7 +24,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install SDK tools
+      - name: Install SDK
         run: |
           sdkmanager \
             "platform-tools" \
@@ -39,7 +38,7 @@ jobs:
           ndk-version: r26b
           add-to-path: true
 
-      - name: Configure CMake
+      - name: Configure
         env:
           NDK: ${{ steps.ndk.outputs.ndk-path }}
         run: |
@@ -57,30 +56,27 @@ jobs:
             -DGGML_LTO=ON \
             \
             -DGGML_VULKAN=OFF \
-            -DGGML_CUDA=OFF \
-            -DGGML_OPENCL=OFF \
-            -DGGML_METAL=OFF \
-            -DGGML_SYCL=OFF \
             \
             -DGGML_USE_LLAMAFILE=OFF \
+            -DGGML_CPU_LLAMAFILE=OFF \
+            -DGGML_CPU_F16=OFF \
             \
             -DLLAMA_BUILD_TESTS=OFF \
             -DLLAMA_BUILD_EXAMPLES=ON \
             -DLLAMA_BUILD_SERVER=ON
 
       - name: Build
-        run: |
-          cmake --build build --parallel
+        run: cmake --build build --parallel
 
-      - name: Strip binaries
+      - name: Strip
         env:
           NDK: ${{ steps.ndk.outputs.ndk-path }}
         run: |
           STRIP=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
-          find build -type f \( -name "llama-*" -o -name "*.so" \) -exec $STRIP {} \; || true
+          find build -type f -exec $STRIP {} \; 2>/dev/null || true
 
-      - name: Upload artifacts
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: llama-armv7-redmi9a
+          name: llama-armv7-redmi9a-fixed
           path: build/**
