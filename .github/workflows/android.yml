@@ -1,54 +1,75 @@
-Warning: apt-key is deprecated. Manage keyring files in trusted.gpg.d instead (see apt-key(8)).
-OK
-Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
-Hit:6 https://packages.microsoft.com/repos/azure-cli noble InRelease
-Get:7 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease [3600 B]
-Get:8 https://dl.google.com/linux/chrome-stable/deb stable InRelease [1825 B]
-Hit:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease
-Get:3 http://azure.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
-Get:4 http://azure.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
-Get:5 http://azure.archive.ubuntu.com/ubuntu noble-security InRelease [126 kB]
-Get:9 https://packages.microsoft.com/ubuntu/24.04/prod noble/main arm64 Packages [156 kB]
-Get:10 https://packages.lunarg.com/vulkan jammy InRelease
-Get:11 https://packages.microsoft.com/ubuntu/24.04/prod noble/main amd64 Packages [187 kB]
-Get:12 https://dl.google.com/linux/chrome-stable/deb stable/main amd64 Packages [1211 B]
-Get:13 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1041 kB]
-Get:14 http://azure.archive.ubuntu.com/ubuntu noble-updates/main Translation-en [261 kB]
-Get:15 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [181 kB]
-Get:16 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 c-n-f Metadata [17.5 kB]
-Get:17 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [1656 kB]
-Get:18 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe Translation-en [326 kB]
-Get:19 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [388 kB]
-Get:20 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 c-n-f Metadata [34.8 kB]
-Get:21 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Packages [1134 kB]
-Get:22 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted Translation-en [257 kB]
-Get:23 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]
-Get:24 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [5760 B]
-Get:25 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [10.5 kB]
-Get:26 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Packages [788 kB]
-Get:27 http://azure.archive.ubuntu.com/ubuntu noble-security/main Translation-en [179 kB]
-Get:28 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Components [44.9 kB]
-Get:29 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 c-n-f Metadata [11.6 kB]
-Get:30 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1171 kB]
-Get:31 http://azure.archive.ubuntu.com/ubuntu noble-security/universe Translation-en [229 kB]
-Get:32 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Components [76.3 kB]
-Get:33 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 c-n-f Metadata [24.1 kB]
-Get:34 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Packages [1071 kB]
-Get:35 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted Translation-en [245 kB]
-Get:36 https://packages.lunarg.com/vulkan jammy/main Sources [198 kB]
-Get:37 https://packages.lunarg.com/vulkan jammy/main amd64 Packages [192 kB]
-Fetched 10.3 MB in 1s (7671 kB/s)
-Reading package lists...
-W: https://packages.lunarg.com/vulkan/dists/jammy/InRelease: Key is stored in legacy trusted.gpg keyring (/etc/apt/trusted.gpg), see the DEPRECATION section in apt-key(8) for details.
-Reading package lists...
-Building dependency tree...
-Reading state information...
-Some packages could not be installed. This may mean that you have
-requested an impossible situation or if you are using the unstable
-distribution that some required packages have not yet been created
-or been moved out of Incoming.
-The following information may help to resolve the situation:
-The following packages have unmet dependencies:
- crashdiagnosticlayer : Depends: libyaml-cpp0.7 (>= 0.7.0) but it is not installable
-E: Unable to correct problems, you have held broken packages.
-Error: Process completed with exit code 100.
+name: Build llama.cpp for Android ARMv7 with Vulkan
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build llama.cpp Android ARMv7 + Vulkan (API 24)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout llama.cpp repository
+        uses: actions/checkout@v4
+        with:
+          repository: ggerganov/llama.cpp
+          submodules: recursive
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+          add-to-path: true
+
+      - name: Install glslc from Ubuntu repositories
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y glslc libvulkan-dev
+
+      - name: Create build directory
+        run: mkdir -p build-android
+
+      - name: Configure CMake for Android with Vulkan
+        working-directory: build-android
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cmake .. \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=armeabi-v7a \
+            -DANDROID_PLATFORM=android-24 \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF \
+            -DGGML_VULKAN=ON \
+            -DCMAKE_C_FLAGS="-march=armv7-a -mfpu=neon -mfloat-abi=softfp" \
+            -DCMAKE_CXX_FLAGS="-march=armv7-a -mfpu=neon -mfloat-abi=softfp"
+
+      - name: Build llama.cpp
+        working-directory: build-android
+        run: |
+          cmake --build . --config Release -j$(nproc)
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llamacpp-android-armv7-vulkan-api24
+          path: |
+            build-android/bin/
+            build-android/lib/
+          retention-days: 7
+          if-no-files-found: warn
