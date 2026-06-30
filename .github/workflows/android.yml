@@ -1,75 +1,88 @@
-name: Build llama.cpp for Android ARMv7 with Vulkan
+name: Build llama.cpp Android ARMv7 Vulkan
 
 on:
-  push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
 
 jobs:
   build:
-    name: Build llama.cpp Android ARMv7 + Vulkan (API 24)
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout llama.cpp repository
+      - name: Checkout llama.cpp
         uses: actions/checkout@v4
         with:
           repository: ggerganov/llama.cpp
           submodules: recursive
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            cmake \
+            glslc
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK components
+      - name: Install SDK components
         run: |
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
 
       - name: Setup Android NDK
+        id: ndk
         uses: nttld/setup-ndk@v1
-        id: setup-ndk
         with:
           ndk-version: r26b
           add-to-path: true
 
-      - name: Install glslc from Ubuntu repositories
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y glslc libvulkan-dev
-
-      - name: Create build directory
-        run: mkdir -p build-android
-
-      - name: Configure CMake for Android with Vulkan
-        working-directory: build-android
+      - name: Configure CMake
         env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         run: |
-          cmake .. \
+          cmake -S . -B build-android \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=armeabi-v7a \
-            -DANDROID_PLATFORM=android-24 \
+            -DANDROID_PLATFORM=24 \
+            -DANDROID_ARM_NEON=ON \
             -DANDROID_STL=c++_shared \
-            -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=ON \
             -DGGML_NATIVE=OFF \
             -DGGML_OPENMP=OFF \
+            -DGGML_LTO=ON \
             -DGGML_VULKAN=ON \
-            -DCMAKE_C_FLAGS="-march=armv7-a -mfpu=neon -mfloat-abi=softfp" \
-            -DCMAKE_CXX_FLAGS="-march=armv7-a -mfpu=neon -mfloat-abi=softfp"
+            -DGGML_VULKAN_SHADER_COMPILER=OFF
 
-      - name: Build llama.cpp
-        working-directory: build-android
+      - name: Build
         run: |
-          cmake --build . --config Release -j$(nproc)
+          cmake --build build-android --parallel
 
-      - name: Upload build artifacts
+      - name: Show build outputs
+        run: |
+          find build-android -type f
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: llamacpp-android-armv7-vulkan-api24
+          name: llama-android-armv7-vulkan
           path: |
-            build-android/bin/
-            build-android/lib/
-          retention-days: 7
+            build-android/bin/**
+            build-android/lib/**
+            build-android/**/*.so
+            build-android/**/*.a
           if-no-files-found: warn
+          retention-days: 7
