@@ -1,11 +1,15 @@
 # ============================================================================
-#  llama.cpp standalone para Termux (armeabi-v7a)
+#  llama.cpp standalone para Termux (armeabi-v7a) - repo independiente
 #
 #  Build manual de los binarios SUELTOS de llama.cpp (llama-server, llama-cli,
 #  llama-bench, llama-quantize) para probar el motor en el teléfono de 32 bits
 #  (Redmi 9A / Helio G25, 8x Cortex-A53) directamente desde Termux, sin Agora.
 #  llama-server es el objetivo principal: usar el celular como servidor LLM
 #  (API compatible con OpenAI + WebUI embebida) accesible desde la red local.
+#
+#  Este workflow NO depende del repo de Agora ni de submodules: clona la
+#  ÚLTIMA versión de llama.cpp (rama master) directamente desde
+#  github.com/ggml-org/llama.cpp en cada ejecución.
 #
 #  Usa EXACTAMENTE la receta CPU del build armv7 de Agora (agora-cpu.yml):
 #    - toolchain NDK r28c + CMake 3.22.1 (los mismos del CI de Agora)
@@ -17,9 +21,6 @@
 #    - GGML_LLAMAFILE OFF y Vulkan OFF (build 100% CPU)
 #    - BUILD_SHARED_LIBS OFF: binarios autocontenidos (solo libomp.so externa)
 #      y STL estático por defecto del toolchain
-#  Por defecto compila el MISMO pin de llama.cpp que usa Agora
-#  (thirdparty/llama.cpp = 00d56b11); el input llamacpp_ref permite probar
-#  otra branch/tag/SHA de ggml-org/llama.cpp.
 #
 #  Se dispara SOLO manualmente (workflow_dispatch): Actions → Run workflow.
 # ============================================================================
@@ -27,14 +28,10 @@ name: llama.cpp standalone (Termux armv7, build manual)
 
 on:
   workflow_dispatch:
-    inputs:
-      llamacpp_ref:
-        description: 'Ref de llama.cpp (vacío = pin del submodule de Agora)'
-        required: false
-        default: ''
-        type: string
 
 env:
+  LLAMACPP_REPO: 'https://github.com/ggml-org/llama.cpp.git'
+  LLAMACPP_BRANCH: 'master'
   NDK_VERSION: '28.2.13676358'
   CMAKE_VERSION: '3.22.1'
   TARGET_ABI: 'armeabi-v7a'
@@ -51,26 +48,20 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Checkout repo + submodules
+      - name: Checkout repo (workflow)
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - name: Info del pin de llama.cpp
-        run: >-
-          git -C thirdparty/llama.cpp log -1 --format='llama.cpp: %h %ci %s'
-
-      # Permite probar otra versión de llama.cpp (branch/tag/SHA) sin tocar el
-      # pin de Agora: útil para comparar rendimiento entre versiones.
-      - name: Cambiar ref de llama.cpp (solo si se pide)
-        if: github.event.inputs.llamacpp_ref != ''
-        env:
-          REF_LLAMACPP: ${{ github.event.inputs.llamacpp_ref }}
+      - name: Clonar llama.cpp (última versión de master)
         run: |
           set -euo pipefail
-          git -C thirdparty/llama.cpp fetch origin "$REF_LLAMACPP"
-          git -C thirdparty/llama.cpp checkout FETCH_HEAD
-          git -C thirdparty/llama.cpp log -1 --format='llama.cpp (ref pedida): %h %ci %s'
+          echo "Repo:   $LLAMACPP_REPO"
+          echo "Branch: $LLAMACPP_BRANCH"
+          git init thirdparty/llama.cpp
+          cd thirdparty/llama.cpp
+          git remote add origin "$LLAMACPP_REPO"
+          git fetch --depth 1 origin "$LLAMACPP_BRANCH"
+          git checkout FETCH_HEAD
+          git log -1 --format='llama.cpp listo: %h %ci %s'
 
       - name: Android SDK + NDK r28c + CMake 3.22.1
         uses: android-actions/setup-android@v4
@@ -82,9 +73,9 @@ jobs:
       # ggml que el patch de agora-cpu.yml para armeabi-v7a, con
       # -mfpu=neon-vfpv4 global (en Agora va como target_compile_options de
       # ggml-cpu; aquí cubre también src/ y los tools, mismo efecto en el
-      # código que importa). LLAMA_BUILD_SERVER queda ON (default del pin) y
-      # aquí SÍ se compila el target llama-server: misma receta CPU, más la
-      # WebUI embebida y el vendor cpp-httplib/nlohmann del pin.
+      # código que importa). LLAMA_BUILD_SERVER queda ON (default) y aquí SÍ
+      # se compila el target llama-server: misma receta CPU, más la WebUI
+      # embebida y el vendor cpp-httplib/nlohmann del upstream.
       - name: Configurar build (CMake + toolchain NDK, receta CPU de Agora)
         run: |
           set -euo pipefail
@@ -157,10 +148,10 @@ jobs:
 
           cat > dist/README.txt <<'EOF'
           llama.cpp standalone for Termux - armeabi-v7a (Redmi 9A / Helio G25)
-          Built with the same CPU recipe as Agora's armv7 build:
+          Built from the latest llama.cpp master with the same CPU recipe as
+          Agora's armv7 build:
           armv7-a + NEON + VFPv4 (VFMA + hardware FP16 conversions) + OpenMP,
           single ggml-cpu variant, llamafile off, Vulkan off.
-          Same llama.cpp pin as Agora.
 
           Files
             llama-server      HTTP server: OpenAI-compatible API + WebUI (main tool)
