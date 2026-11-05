@@ -1,88 +1,243 @@
-name: Build llama.cpp Android ARMv7 Vulkan
+# ============================================================================
+#  llama.cpp standalone para Termux (armeabi-v7a)
+#
+#  Build manual de los binarios SUELTOS de llama.cpp (llama-server, llama-cli,
+#  llama-bench, llama-quantize) para probar el motor en el teléfono de 32 bits
+#  (Redmi 9A / Helio G25, 8x Cortex-A53) directamente desde Termux, sin Agora.
+#  llama-server es el objetivo principal: usar el celular como servidor LLM
+#  (API compatible con OpenAI + WebUI embebida) accesible desde la red local.
+#
+#  Usa EXACTAMENTE la receta CPU del build armv7 de Agora (agora-cpu.yml):
+#    - toolchain NDK r28c + CMake 3.22.1 (los mismos del CI de Agora)
+#    - ggml-cpu único (GGML_CPU_ALL_VARIANTS OFF), -march=armv7-a
+#      (GGML_CPU_ARM_ARCH, la rama armv7 del dispatch de ABI de Agora)
+#    - -mfpu=neon-vfpv4: NEON + VFMA + conversiones FP16 hardware (VFPv4 del
+#      Cortex-A53; mejora el -mfpu=neon que el NDK ya añade para armeabi-v7a)
+#    - OpenMP ON (libomp del NDK, se empaqueta junto a los binarios)
+#    - GGML_LLAMAFILE OFF y Vulkan OFF (build 100% CPU)
+#    - BUILD_SHARED_LIBS OFF: binarios autocontenidos (solo libomp.so externa)
+#      y STL estático por defecto del toolchain
+#  Por defecto compila el MISMO pin de llama.cpp que usa Agora
+#  (thirdparty/llama.cpp = 00d56b11); el input llamacpp_ref permite probar
+#  otra branch/tag/SHA de ggml-org/llama.cpp.
+#
+#  Se dispara SOLO manualmente (workflow_dispatch): Actions → Run workflow.
+# ============================================================================
+name: llama.cpp standalone (Termux armv7, build manual)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
-  pull_request:
-    branches:
-      - main
-      - master
+    inputs:
+      llamacpp_ref:
+        description: 'Ref de llama.cpp (vacío = pin del submodule de Agora)'
+        required: false
+        default: ''
+        type: string
+
+env:
+  NDK_VERSION: '28.2.13676358'
+  CMAKE_VERSION: '3.22.1'
+  TARGET_ABI: 'armeabi-v7a'
+  # API 29 (Android 10, el OS de fábrica del Redmi 9A): bionic solo expone
+  # posix_spawn* desde API 28 y vendor/sheredom/subprocess.h (llama-common)
+  # lo usa; con android-26 la compilación falla con "use of undeclared
+  # identifier 'posix_spawn_file_actions_init'".
+  ANDROID_API: '29'
 
 jobs:
-  build:
+  build-armeabiv7-termux:
+    name: llama.cpp · armv7 CPU+OpenMP (Termux)
     runs-on: ubuntu-latest
+    timeout-minutes: 90
 
     steps:
-      - name: Checkout llama.cpp
+      - name: Checkout repo + submodules
         uses: actions/checkout@v4
         with:
-          repository: ggerganov/llama.cpp
           submodules: recursive
-          fetch-depth: 1
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            ninja-build \
-            cmake \
-            glslc
+      - name: Info del pin de llama.cpp
+        run: >-
+          git -C thirdparty/llama.cpp log -1 --format='llama.cpp: %h %ci %s'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK components
-        run: |
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-34" \
-            "build-tools;34.0.0"
-
-      - name: Setup Android NDK
-        id: ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r26b
-          add-to-path: true
-
-      - name: Configure CMake
+      # Permite probar otra versión de llama.cpp (branch/tag/SHA) sin tocar el
+      # pin de Agora: útil para comparar rendimiento entre versiones.
+      - name: Cambiar ref de llama.cpp (solo si se pide)
+        if: github.event.inputs.llamacpp_ref != ''
         env:
-          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          REF_LLAMACPP: ${{ github.event.inputs.llamacpp_ref }}
         run: |
-          cmake -S . -B build-android \
-            -G Ninja \
+          set -euo pipefail
+          git -C thirdparty/llama.cpp fetch origin "$REF_LLAMACPP"
+          git -C thirdparty/llama.cpp checkout FETCH_HEAD
+          git -C thirdparty/llama.cpp log -1 --format='llama.cpp (ref pedida): %h %ci %s'
+
+      - name: Android SDK + NDK r28c + CMake 3.22.1
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "ndk;${{ env.NDK_VERSION }} cmake;${{ env.CMAKE_VERSION }}"
+          log-accepted-licenses: true
+
+      # Receta CPU de Agora: mismo toolchain, misma ABI, mismos switches de
+      # ggml que el patch de agora-cpu.yml para armeabi-v7a, con
+      # -mfpu=neon-vfpv4 global (en Agora va como target_compile_options de
+      # ggml-cpu; aquí cubre también src/ y los tools, mismo efecto en el
+      # código que importa). LLAMA_BUILD_SERVER queda ON (default del pin) y
+      # aquí SÍ se compila el target llama-server: misma receta CPU, más la
+      # WebUI embebida y el vendor cpp-httplib/nlohmann del pin.
+      - name: Configurar build (CMake + toolchain NDK, receta CPU de Agora)
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}"
+          cmake -S thirdparty/llama.cpp -B build \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="${{ env.TARGET_ABI }}" \
+            -DANDROID_PLATFORM="android-${{ env.ANDROID_API }}" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=armeabi-v7a \
-            -DANDROID_PLATFORM=24 \
-            -DANDROID_ARM_NEON=ON \
-            -DANDROID_STL=c++_shared \
-            -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_C_FLAGS="-mfpu=neon-vfpv4" \
+            -DCMAKE_CXX_FLAGS="-mfpu=neon-vfpv4" \
+            -DGGML_VULKAN=OFF \
+            -DGGML_OPENMP=ON \
             -DGGML_NATIVE=OFF \
-            -DGGML_OPENMP=OFF \
-            -DGGML_LTO=ON \
-            -DGGML_VULKAN=ON \
-            -DGGML_VULKAN_SHADER_COMPILER=OFF
+            -DGGML_CPU_ALL_VARIANTS=OFF \
+            -DGGML_CPU_ARM_ARCH="armv7-a" \
+            -DGGML_LLAMAFILE=OFF \
+            -DGGML_CCACHE=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DLLAMA_OPENSSL=OFF \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF
+          echo "Configuración CMake OK (Release, armv7-a + neon-vfpv4 + OpenMP)"
 
-      - name: Build
+      # El log completo queda en build.log; los grep confirman que las flags
+      # de la receta llegaron de verdad al compilador (no basta un build verde).
+      # En fallo, se extrae el contexto de los errores (make -j los esparce por
+      # todo el log, un tail se los come).
+      - name: Compilar (Release)
         run: |
-          cmake --build build-android --parallel
+          set -euo pipefail
+          cmake --build build --target llama-server llama-cli llama-bench llama-quantize -j"$(nproc)" --verbose > build.log 2>&1 || {
+            echo "=== ERRORES DE COMPILACIÓN (grep) ==="
+            grep -n -E 'error:|fatal error:' build.log | head -40 || true
+            echo "=== CONTEXTO DEL PRIMER ERROR ==="
+            FIRST="$(grep -n -E 'error:' build.log | head -1 | cut -d: -f1 || true)"
+            if [ -n "$FIRST" ]; then
+              START=$(( FIRST > 15 ? FIRST - 15 : 1 ))
+              sed -n "${START},$(( FIRST + 15 ))p" build.log
+            fi
+            echo "=== ÚLTIMAS 40 LÍNEAS ==="
+            tail -40 build.log
+            exit 1
+          }
+          grep -q -- '-mfpu=neon-vfpv4' build.log || { echo "ERROR: -mfpu=neon-vfpv4 no llegó al compilador"; exit 1; }
+          grep -q -- '-march=armv7-a'   build.log || { echo "ERROR: -march=armv7-a ausente"; exit 1; }
+          grep -q -- '-fopenmp'         build.log || { echo "ERROR: OpenMP ausente (GGML_OPENMP)"; exit 1; }
+          echo "Compilación OK; flags verificadas en el log (armv7-a + neon-vfpv4 + OpenMP)"
 
-      - name: Show build outputs
+      - name: Empaquetar (binarios strip + libomp + README)
         run: |
-          find build-android -type f
+          set -euo pipefail
+          TC="$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}/toolchains/llvm/prebuilt/linux-x86_64"
+          mkdir -p dist
+          for BIN in llama-server llama-cli llama-bench llama-quantize; do
+            [ -f "build/bin/$BIN" ] || { echo "ERROR: falta build/bin/$BIN"; ls build/bin || true; exit 1; }
+            "$TC/bin/llvm-strip" --strip-unneeded "build/bin/$BIN"
+            cp "build/bin/$BIN" dist/
+          done
 
-      - name: Upload artifacts
+          # OpenMP runtime (misma fuente y fallback que agora-cpu.yml)
+          LIBOMP="$(ls "$TC"/lib/clang/*/lib/linux/arm/libomp.so 2>/dev/null | head -1 || true)"
+          [ -n "$LIBOMP" ] || LIBOMP="$TC/sysroot/usr/lib/arm-linux-androideabi/libomp.so"
+          [ -n "$LIBOMP" ] || { echo "ERROR: libomp.so no está en el NDK"; exit 1; }
+          cp "$LIBOMP" dist/libomp.so
+
+          # C++ runtime: el toolchain del NDK enlaza libc++ estáticamente por
+          # defecto (-static-libstdc++), así que no hace falta empaquetar
+          # libc++_shared.so; la verificación de NEEDED lo confirma.
+
+          cat > dist/README.txt <<'EOF'
+          llama.cpp standalone for Termux - armeabi-v7a (Redmi 9A / Helio G25)
+          Built with the same CPU recipe as Agora's armv7 build:
+          armv7-a + NEON + VFPv4 (VFMA + hardware FP16 conversions) + OpenMP,
+          single ggml-cpu variant, llamafile off, Vulkan off.
+          Same llama.cpp pin as Agora.
+
+          Files
+            llama-server      HTTP server: OpenAI-compatible API + WebUI (main tool)
+            llama-cli         chat and one-shot generation
+            llama-bench       speed benchmark (prefill pp + decode tg)
+            llama-quantize    quantize / convert GGUF models
+            libomp.so         OpenMP runtime (required at run time)
+            SHA256SUMS.txt    checksums of every file
+
+          Setup in Termux
+            1. mkdir -p ~/llamacpp && cd ~/llamacpp
+            2. Copy the files here after unzipping, e.g. from Downloads:
+               termux-setup-storage
+               cp /sdcard/Download/llamacpp-armeabiv7-termux/* .
+            3. chmod +x llama-server llama-cli llama-bench llama-quantize
+            4. export LD_LIBRARY_PATH=$HOME/llamacpp
+
+          Find your best thread count (Helio G25: 4x A53 @2.0GHz + 4x @1.5GHz)
+            ./llama-bench -m model.gguf -t 2 -t 4 -t 6 -t 8 -p 256 -n 128
+
+          Chat
+            ./llama-cli -m model.gguf -t 4 -cnv --simple-io
+
+          Server (use the phone as an LLM server)
+            # Keep Android from killing/suspending Termux while it runs:
+              termux-wake-lock
+            # Serve on the LAN (no auth: only trusted networks!), then open
+            # http://<phone-ip>:8080 in any browser on the same Wi-Fi:
+              ./llama-server -m model.gguf -t 4 --host 0.0.0.0 --port 8080
+            # Phone only (curl from Termux itself): drop --host (127.0.0.1).
+            # OpenAI-compatible endpoint:
+              curl http://127.0.0.1:8080/v1/chat/completions \
+                -H 'Content-Type: application/json' \
+                -d '{"messages":[{"role":"user","content":"hola"}]}'
+            # Health / loaded model:
+              curl http://127.0.0.1:8080/health
+            # When done:
+              termux-wake-unlock
+
+          Notes
+            - For long sessions also disable battery optimization for Termux
+              (Settings > Apps > Termux > Battery > Unrestricted) or Android
+              may kill the server when the screen goes off.
+            - Ports below 1024 need root: use 1024+ (8080 default is fine).
+            - Token generation (tg) is memory-bandwidth bound: -t 4 often
+              matches or beats -t 8 on big.LITTLE A53. Prefill (pp) scales
+              further.
+            - If you see "CANNOT LINK EXECUTABLE ... libomp.so", re-run step 4.
+            - SHA256SUMS.txt contains the checksums of every file.
+          EOF
+
+          (cd dist && sha256sum llama-server llama-cli llama-bench llama-quantize libomp.so > SHA256SUMS.txt)
+          ls -la dist/
+
+      - name: Verificar binarios (ELF32 ARM + linker Android)
+        run: |
+          set -euo pipefail
+          TC="$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}/toolchains/llvm/prebuilt/linux-x86_64"
+          RE="$TC/bin/llvm-readelf"
+          for BIN in dist/llama-server dist/llama-cli dist/llama-bench dist/llama-quantize; do
+            echo "=== $BIN ==="
+            "$RE" -h "$BIN" | grep -E 'Class:|Machine:' | sed 's/^ *//'
+            "$RE" -h "$BIN" | grep -q 'Class:.*ELF32'  || { echo "ERROR: $BIN no es ELF32"; exit 1; }
+            "$RE" -h "$BIN" | grep -q 'Machine:.*ARM'  || { echo "ERROR: $BIN no es ARM"; exit 1; }
+            "$RE" -l "$BIN" | grep -q '/system/bin/linker' || { echo "ERROR: $BIN sin dynamic linker de Android"; exit 1; }
+            BAD="$("$RE" -d "$BIN" | grep 'NEEDED' | grep -v -E 'libomp\.so|libc\.so|libm\.so|libdl\.so|liblog\.so|libc\+\+_shared\.so' || true)"
+            [ -z "$BAD" ] || { echo "ERROR: dependencia inesperada en $BIN: $BAD"; exit 1; }
+            "$RE" -d "$BIN" | grep -q 'libomp.so' || { echo "ERROR: $BIN no enlaza libomp.so (OpenMP OFF?)"; exit 1; }
+            echo "  Atributos ARM (NEON/VFP):"
+            "$RE" -A "$BIN" | grep -E 'Tag_CPU_name|Tag_Advanced_SIMD_arch|Tag_VFP_arch|Tag_FP_arch' | sed 's/^ */  /' || true
+          done
+          echo "Binarios verificados: ELF32 ARM, linker de Android, solo bionic + libomp"
+
+      - name: Subir binarios
         uses: actions/upload-artifact@v4
         with:
-          name: llama-android-armv7-vulkan
-          path: |
-            build-android/bin/**
-            build-android/lib/**
-            build-android/**/*.so
-            build-android/**/*.a
-          if-no-files-found: warn
-          retention-days: 7
+          name: llamacpp-armeabiv7-termux
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
